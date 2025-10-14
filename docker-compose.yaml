@@ -3,6 +3,7 @@ version: '3'
 services:
   source_postgres:
     image: postgres:15
+    container_name: source_postgres
     ports:
       - '5433:5432'
     networks:
@@ -12,10 +13,12 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: secret
     volumes:
+      # Mount your init.sql to run automatically at container creation
       - ./source_db_init/init.sql:/docker-entrypoint-initdb.d/init.sql
 
   destination_postgres:
     image: postgres:15
+    container_name: destination_postgres
     ports:
       - '5434:5432'
     networks:
@@ -24,40 +27,42 @@ services:
       POSTGRES_DB: destination_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: secret
+    volumes:
+      # Optional: mount a separate init.sql if you want to pre-populate destination DB too
+      - ./destination_db_init/init.sql:/docker-entrypoint-initdb.d/init.sql
 
   elt_script:
     build:
-      context: ./elt # Directory containing the Dockerfile and elt_script.py
-      dockerfile: Dockerfile # Name of the Dockerfile, if it's something other than "Dockerfile", specify here
+      context: ./elt
+      dockerfile: Dockerfile
     command: ['python', 'elt_script.py']
     networks:
       - elt_network
     depends_on:
       - source_postgres
       - destination_postgres
-  
+
   dbt:
     image: ghcr.io/dbt-labs/dbt-postgres:1.4.7
-    command: 
+    container_name: dbt
+    command:
       [
         "run",
         "--profiles-dir",
         "/root",
         "--project-dir",
-        "/dbt"    
+        "/dbt"
       ]
     networks:
       - elt_network
     volumes:
-      - ./custom_postgres:/dbt
-      - ~/.dbt:/root
+      - ./custom_postgres:/dbt      # dbt project directory
+      - ~/.dbt:/root                # local profile dir
     depends_on:
       - elt_script
     environment:
-      DBT_PROFILE: default
+      DBT_PROFILE: custom_postgres
       DBT_TARGET: dev
-
-      
 
 networks:
   elt_network:
