@@ -5,7 +5,7 @@ services:
     image: postgres:15
     container_name: source_postgres
     ports:
-      - '5432:5432'
+      - '5432:5432'  # Host port 5432 -> container port 5432
     networks:
       - elt_network
     environment:
@@ -23,16 +23,14 @@ services:
   destination_postgres:
     image: postgres:15
     container_name: destination_postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: secret
-      POSTGRES_DB: destination_db
     ports:
-      - "5433:5432"
+      - "5433:5432"  # Host port 5433 -> container port 5432
     networks:
       - elt_network
-    volumes:
-      - ./destination_postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      POSTGRES_DB: destination_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secret
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d destination_db"]
       interval: 5s
@@ -47,9 +45,9 @@ services:
     networks:
       - elt_network
     depends_on:
-      destination_postgres:
-        condition: service_healthy
       source_postgres:
+        condition: service_healthy
+      destination_postgres:
         condition: service_healthy
 
   dbt:
