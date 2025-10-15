@@ -1,11 +1,11 @@
-version: '3'
+version: '3.8'
 
 services:
   source_postgres:
     image: postgres:15
     container_name: source_postgres
     ports:
-      - '5433:5432'
+      - '5432:5432'
     networks:
       - elt_network
     environment:
@@ -13,23 +13,31 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: secret
     volumes:
-      # Mount your init.sql to run automatically at container creation
       - ./source_db_init/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d source_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   destination_postgres:
     image: postgres:15
     container_name: destination_postgres
-    ports:
-      - '5434:5432'
-    networks:
-      - elt_network
     environment:
-      POSTGRES_DB: destination_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: secret
+      POSTGRES_DB: destination_db
+    ports:
+      - "5433:5432"
+    networks:
+      - elt_network
     volumes:
-      # Optional: mount a separate init.sql if you want to pre-populate destination DB too
-      - ./destination_db_init/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./destination_postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d destination_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   elt_script:
     build:
@@ -39,8 +47,10 @@ services:
     networks:
       - elt_network
     depends_on:
-      - source_postgres
-      - destination_postgres
+      destination_postgres:
+        condition: service_healthy
+      source_postgres:
+        condition: service_healthy
 
   dbt:
     image: ghcr.io/dbt-labs/dbt-postgres:1.4.7
@@ -56,10 +66,13 @@ services:
     networks:
       - elt_network
     volumes:
-      - ./custom_postgres:/dbt      # dbt project directory
-      - ~/.dbt:/root                # local profile dir
+      - ./custom_postgres:/dbt
+      - ~/.dbt:/root
     depends_on:
-      - elt_script
+      elt_script:
+        condition: service_completed_successfully
+      destination_postgres:
+        condition: service_healthy
     environment:
       DBT_PROFILE: custom_postgres
       DBT_TARGET: dev
