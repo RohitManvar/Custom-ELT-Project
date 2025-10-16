@@ -5,7 +5,7 @@ services:
     image: postgres:15
     container_name: source_postgres
     ports:
-      - '5432:5432'  # Host port 5432 -> container port 5432
+      - '5432:5432'
     networks:
       - elt_network
     environment:
