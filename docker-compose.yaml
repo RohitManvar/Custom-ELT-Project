@@ -75,6 +75,28 @@ services:
       DBT_PROFILE: custom_postgres
       DBT_TARGET: dev
 
+  postgres:
+    image: postgres:latest
+    network:
+      - elt_network
+    environment:
+      - POSTGRES_USER = airflow
+      - POSTGRES_PASSWORD = airflow
+      - POSTGRES_DB = airflow
+
+  init-airflow:
+    image: apache/airflow:latest
+    depends_on:
+      - postgres
+    networks:
+      - elt_network
+    environment:
+      - AIRFLOW__DATABASE__SQL__ALCHEMY__CONN=postgres+psycopg2://airflow:airflow@postgres/airflow
+    command: >
+      bash -c "airflow db init &&
+              airflow users create --usename airflow --password password --firstname  John --lastname role Admin --email admin@example.com"
+
+
 networks:
   elt_network:
     driver: bridge
