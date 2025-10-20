@@ -96,6 +96,68 @@ services:
       bash -c "airflow db init &&
               airflow users create --usename airflow --password password --firstname  John --lastname role Admin --email admin@example.com"
 
+  webserver:
+    build:
+      context:
+      dockerfile: Dockerfile
+    user: root
+    depends_on:
+      - postgres
+    networks:
+      - elt_network
+    extra_hosts:
+      -  "host.docker.internal: host-gateway"
+    volumes:
+      - ./airlow/dags:/opt/airflow/dags
+      - ./elt:/opt/airflow/elt
+      - ./custom_postgres:/opt/dbt 
+      - ~/.dbt:/root/.dbt
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - LOAD_EX=n
+      - EXECUTOR=Local
+      - AIRFLOW__DATABASE__SQL__ALCHEMY__CONN=postgres+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FORNATE_KEY=du9CBzeR1-q8bQGQc9c0-rDqPpVXZvmI2cT2846ECWI=
+      - AIRFLOW__WEBSERVER__DEFAULT__USER_USERUSERNAME=airflow
+      - AIRFLOW__WEBSERVER__DEFAULT__USER_PASSWORD=password
+      - AIRFLOW_WWW_USER_USERNAME=airflow
+      - AIRFLOW_WWW_USER_PASSWORD=password
+      - AIRFLOW__WEBSERVER__SECRET_KEY=secret
+    ports:
+      - "8080:8080"
+    command: webserver
+
+  scheduler:
+    build:
+      context:
+      dockerfile: Dockerfile
+    user: root
+    depends_on:
+      - postgres
+    networks:
+      - elt_network
+    extra_hosts:
+      -  "host.docker.internal: host-gateway"
+    volumes:
+      - ./airlow/dags:/opt/airflow/dags
+      - ./elt:/opt/airflow/elt
+      - ./custom_postgres:/opt/dbt 
+      - ~/.dbt:/root/.dbt
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - LOAD_EX=n
+      - EXECUTOR=Local
+      - AIRFLOW__DATABASE__SQL__ALCHEMY__CONN=postgres+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FORNATE_KEY=du9CBzeR1-q8bQGQc9c0-rDqPpVXZvmI2cT2846ECWI=
+      - AIRFLOW__WEBSERVER__DEFAULT__USER_USERUSERNAME=airflow
+      - AIRFLOW__WEBSERVER__DEFAULT__USER_PASSWORD=password
+      - AIRFLOW_WWW_USER_USERNAME=airflow
+      - AIRFLOW_WWW_USER_PASSWORD=password
+      - AIRFLOW__WEBSERVER__SECRET_KEY=secret
+    ports:
+      - "8080:8080"
+    command: webserver
+    
 
 networks:
   elt_network:
