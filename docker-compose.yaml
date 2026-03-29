@@ -1,0 +1,197 @@
+services:
+  source_postgres:
+    image: postgres:15
+    container_name: source_postgres
+    ports:
+      - '5432:5432'
+    networks:
+      - elt_network
+    environment:
+      POSTGRES_DB: ${SOURCE_POSTGRES_DB}
+      POSTGRES_USER: ${SOURCE_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${SOURCE_POSTGRES_PASSWORD}
+    volumes:
+      - ./source_db_init/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SOURCE_POSTGRES_USER} -d ${SOURCE_POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  destination_postgres:
+    image: postgres:15
+    container_name: destination_postgres
+    ports:
+      - "5433:5432"
+    networks:
+      - elt_network
+    environment:
+      POSTGRES_DB: ${DESTINATION_POSTGRES_DB}
+      POSTGRES_USER: ${DESTINATION_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${DESTINATION_POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DESTINATION_POSTGRES_USER} -d ${DESTINATION_POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  elt_script:
+    build:
+      context: ./elt
+      dockerfile: Dockerfile
+    command: ['python', 'elt_script.py']
+    networks:
+      - elt_network
+    env_file:
+      - .env
+    depends_on:
+      source_postgres:
+        condition: service_healthy
+      destination_postgres:
+        condition: service_healthy
+
+  dbt:
+    image: ghcr.io/dbt-labs/dbt-postgres:1.4.7
+    container_name: dbt
+    command: ["run", "--profiles-dir", "/root", "--project-dir", "/dbt"]
+    networks:
+      - elt_network
+    volumes:
+      - ./custom_postgres:/dbt
+      - ~/.dbt:/root
+    depends_on:
+      elt_script:
+        condition: service_completed_successfully
+      destination_postgres:
+        condition: service_healthy
+    environment:
+      DBT_PROFILE: custom_postgres
+      DBT_TARGET: dev
+
+  postgres:
+    image: postgres:latest
+    container_name: airflow_postgres
+    networks:
+      - elt_network
+    environment:
+      POSTGRES_USER: ${AIRFLOW_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${AIRFLOW_POSTGRES_DB}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AIRFLOW_POSTGRES_USER} -d ${AIRFLOW_POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  init-airflow:
+    image: apache/airflow:2.9.3
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - elt_network
+    env_file:
+      - .env
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_POSTGRES_USER}:${AIRFLOW_POSTGRES_PASSWORD}@postgres/${AIRFLOW_POSTGRES_DB}
+    command:
+      - bash
+      - -c
+      - "airflow db migrate && airflow users create --username ${AIRFLOW_WWW_USER_USERNAME} --password ${AIRFLOW_WWW_USER_PASSWORD} --firstname Admin --lastname User --role Admin --email admin@example.com"
+
+  webserver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: root
+    container_name: airflow_webserver
+    depends_on:
+      postgres:
+        condition: service_healthy
+      init-airflow:
+        condition: service_completed_successfully
+    networks:
+      - elt_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./elt:/opt/airflow/elt
+      - ./custom_postgres:/opt/dbt
+      - ~/.dbt:/root/.dbt
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - .env
+    environment:
+      - LOAD_EX=n
+      - EXECUTOR=Local
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_POSTGRES_USER}:${AIRFLOW_POSTGRES_PASSWORD}@postgres/${AIRFLOW_POSTGRES_DB}
+      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW__CORE__FERNET_KEY}
+      - AIRFLOW_WWW_USER_USERNAME=${AIRFLOW_WWW_USER_USERNAME}
+      - AIRFLOW_WWW_USER_PASSWORD=${AIRFLOW_WWW_USER_PASSWORD}
+      - AIRFLOW__WEBSERVER__SECRET_KEY=${AIRFLOW__WEBSERVER__SECRET_KEY}
+      - AIRFLOW__WEBSERVER__WORKER_TIMEOUT=300
+      - AIRFLOW__WEBSERVER__WORKERS=2
+    ports:
+      - "8080:8080"
+    command: webserver
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: root
+    container_name: airflow_scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+      init-airflow:
+        condition: service_completed_successfully
+    networks:
+      - elt_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./elt:/opt/airflow/elt
+      - ./custom_postgres:/opt/dbt
+      - ~/.dbt:/root/.dbt
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - .env
+    environment:
+      - LOAD_EX=n
+      - EXECUTOR=Local
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${AIRFLOW_POSTGRES_USER}:${AIRFLOW_POSTGRES_PASSWORD}@postgres/${AIRFLOW_POSTGRES_DB}
+      - AIRFLOW__CORE__FERNET_KEY=${AIRFLOW__CORE__FERNET_KEY}
+      - AIRFLOW_WWW_USER_USERNAME=${AIRFLOW_WWW_USER_USERNAME}
+      - AIRFLOW_WWW_USER_PASSWORD=${AIRFLOW_WWW_USER_PASSWORD}
+      - AIRFLOW__WEBSERVER__SECRET_KEY=${AIRFLOW__WEBSERVER__SECRET_KEY}
+    command: scheduler
+
+  metabase:
+    image: metabase/metabase:latest
+    container_name: metabase
+    ports:
+      - "3001:3000"
+    networks:
+      - elt_network
+    depends_on:
+      destination_postgres:
+        condition: service_healthy
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: destination_postgres
+      MB_DB_PORT: 5432
+      MB_DB_DBNAME: ${DESTINATION_POSTGRES_DB}
+      MB_DB_USER: ${DESTINATION_POSTGRES_USER}
+      MB_DB_PASS: ${DESTINATION_POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+networks:
+  elt_network:
+    driver: bridge

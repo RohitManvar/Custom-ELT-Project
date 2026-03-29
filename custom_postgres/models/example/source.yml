@@ -1,0 +1,14 @@
+version: 2
+
+sources:
+  - name: destination_db
+    database: destination_db
+    schema: public 
+    tables:
+      - name: films
+        description:  "List of the films" 
+      - name: actors 
+        description:  "List of the actors"
+      - name: film_actors
+        description:  "Mapping between films and actors"
+      
