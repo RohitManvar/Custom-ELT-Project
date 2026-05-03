@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd /c dir D:Custom-ELT-Project-maindashboard)",
+      "Bash(cmd /c \"dir dashboard\")",
+      "Bash(cmd /c dir)",
+      "Bash(cmd /c dir dashboard)",
+      "Bash(docker cp:*)",
+      "Bash(docker exec:*)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
+    ]
+  }
+}
